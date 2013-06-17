@@ -15,3 +15,5 @@ StandardInput=tty-force
 StandardOutput=tty-force
 StandardError=inherit
 
+[Install]
+WantedBy=multi-user.target

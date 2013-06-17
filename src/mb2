@@ -26,23 +26,56 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-buildroot=$(pwd)/myroot
+buildroot=$(pwd)/installroot
+DEVICES_XML=/etc/mersdk/share/devices.xml
+deviceuser=nemo
 
 usage() {
     cat <<EOF
-usage: $ME -t <target> [-s <specfile>] qmake [<args>] | make [<args>] | install [<args>] | rpm [<args>]
+usage: $ME [-t <target>] [-s <specfile>] [-d <device>] [-p <projectdir>]
+           qmake [<args>] | make [<args>] | install [<args>] | rpm [<args>]
 
   Executes a subset of build commands in the context of an rpmbuild.
   Typically called from QtCreator to perform qmake/make phases of a project.
   Note that any other build steps in the .spec file will also be run.
 
-  <specfile> will be looked for in the current rpm/ dir. If there is more than one it must be provided.
+  <specfile> will be looked for in the current rpm/ dir. If there is
+  more than one it must be provided.
+
+  CWD is used as a base dir for installroot/ and RPMS/ to allow for
+  shadowbuilds
+
+  $ME is aware of spectacle and will update the spec file if there is
+  an obvious yaml file which is newer.
 
   $ME qmake [<args>] : runs qmake in the 'build' phase
+                       Note that this also verifies target
+                       build dependencies are up to date
+                     : can use -s -t -p  
+
   $ME make [<args>]  : run make in the 'build' phase
+                     : can use -s -t -p  
+
+  $ME deploy --zypper|--rsync
+                     : runs the install or rpm-creation phase and then
+                       copies/installs the relevant files to the device
+                     : can use -s -t -p -d
+
+  $ME run|ssh [<args>] : runs a command (on device if --device given);
+                         intended for running gdb and a gdb server
+                     : can use -s -t -p -d
 
   $ME install [<args>] : runs the 'install' phase to install to $buildroot
+                     : can use -s -t -p
   $ME rpm [<args>] : runs the install & rpm-creation phases
+                     : can use -s -t -p
+
+
+  -t | --target      : specify the sb2 target to use
+  -d | --device      : specify the device
+  -p | --projectdir  : when running shadow build/deploy from another dir
+  -s | --specfile    : if the specfile is not in rpm/*.spec and cannot be found using -p
+
 EOF
 }
 
@@ -57,7 +90,97 @@ assert_spec_supports_mb2() {
     fi
 }
 
+ensure_spec_newer_than_yaml() {
+    yaml=$(dirname $spec)/$(basename $spec .spec).yaml
+    [[ -f $yaml ]] || return # User has decided not to use yaml
+    if [[ $yaml -nt $spec ]]; then # -nt is newer than
+	echo "$yaml -nt $spec"
+	ls -laF $yaml $spec
+	specify -n -N $yaml
+    fi
+}
+
+verify_target_dependencies() {
+    grep -i BuildRequires "$spec" | sed -e '/^#/d' -e 's/\w*BuildRequires://i' -e 's/,/ /g' | xargs --no-run-if-empty sb2 -t "$target" -m sdk-install -R zypper in 
+}
+
+get_spec_value(){
+    grep -i "^${1}:" $spec | sed -e 's/^.*:\s*//g' -e 's/\s*$//g'
+}
+
+# Helper to read XML
+read_dom () {
+    local IFS=\>
+    read -d \< ENTITY CONTENT
+    local RET=$?
+    TAG_NAME=${ENTITY%% *}
+    ATTRIBUTES=${ENTITY#* }
+    return $RET
+}
+
+# This slurps the XML and converts tags like <subnet> to $device_subnet
+# Also sets device_name and device_type from the attributes
+get_device() {
+    local FOUND=
+    while read_dom; do
+	case $TAG_NAME in
+	    device )
+		[[ $FOUND ]] && break # found - and we're on the next
+				      # <device> so we're done
+		eval local $ATTRIBUTES
+		;;
+	    mac|index|subnet|ip|sshkeypath )
+		eval device_$TAG_NAME="$CONTENT"
+		;;
+	esac
+	[[ "$name" == "$1" ]] && {
+	    FOUND=1
+	    device_name=$name
+	    device_type=$type
+	}
+    done
+    [[ $FOUND ]] || return 1
+    # Set this up as it's useful
+    if [[ $device_subnet ]]; then
+	device_ip=$device_subnet.$device_index
+    fi
+    return 0
+}
+
+rsync_as() {
+    local user=$1;shift
+    local key="$(dirname $DEVICES_XML)/${device_sshkeypath}/$user"
+    [[ -f $key ]] || fatal "No key for user $user on $device_name given in devices.xml"
+    RSYNC_RSH="ssh -l $user -i $key" rsync "$@"
+}
+
+ssh_as() {
+    local user=$1;shift
+    local key="$(dirname $DEVICES_XML)/${device_sshkeypath}/$user"
+    ssh -i $key -l $user $device_ip $@
+}
+
+run_build() {
+    # intended to provide mb build behaviour
+    verify_target_dependencies
+    sed -e '/^%patch/d' $spec > $spec.$$
+    eval sb2 -t $target rpmbuild --build-in-place \
+	$BUILD_DEBUG \
+	--define \"_rpmdir $(pwd)/RPMS \" \
+	--define \"_sourcedir $(pwd)/rpm \" \
+	--define \"_rpmfilename %%{name}-%%{version}-%%{release}.%%{arch}.rpm \" \
+	--buildroot=$buildroot \
+	--dobuild \
+	--doinstall \
+	--dobinary \
+	--docheck \
+	$spec.$$
+    rm -f $spec.$$
+}
+
 run_qmake() {
+    # This is a good time to verify the target dependencies as per mb
+    verify_target_dependencies
     eval sb2 -t $target rpmbuild --build-in-place \
 	--dobuild \
 	--define \"qtc_builddir $(pwd) \" \
@@ -76,9 +199,10 @@ run_make() {
 }
 
 run_install() {
-    # Install to ./myroot which should be rsync'ed to /opt/sdk/$package on device
+    # Install to buildroot which should be rsync'ed to /opt/sdk/$package on device
     eval sb2 -t $target rpmbuild --build-in-place \
 	--define \"qtc_builddir $(pwd) \" \
+	--define \"_sourcedir $(pwd)/rpm \" \
 	--buildroot=$buildroot \
 	--doinstall \
 	$spec
@@ -87,6 +211,9 @@ run_install() {
 run_rpm() {
     eval sb2 -t $target rpmbuild --build-in-place \
 	--define \"qtc_builddir $(pwd) \" \
+	--define \"_rpmdir $(pwd)/RPMS \" \
+	--define \"_sourcedir $(pwd)/rpm \" \
+	--define \"_rpmfilename %%{name}-%%{version}-%%{release}.%%{arch}.rpm \" \
 	--buildroot=$buildroot \
 	--doinstall \
 	--dobinary \
@@ -94,6 +221,27 @@ run_rpm() {
 	$spec
 }
 
+run_deploy() {
+    [[ $device_type ]] || fatal "deploy must have a valid --device"
+	while [[ $1 ]]; do
+	case "$1" in
+            "--zypper" ) shift
+		run_rpm
+		rpms=$(find RPMS -name \*rpm | grep -v -- "-debug")
+		rsync_as root -av ${rpms} $device_ip:/root/RPMS/
+		ssh_as root zypper --non-interactive in -f ${rpms}
+		;;
+            "--rsync" ) shift
+		user=root
+		run_install
+		name=$(get_spec_value Name)
+		rsync_as $user -av ${buildroot}/. $device_ip:/opt/sdk/$name
+		;;
+	    *)
+		fatal "deploy must use either --rsync or --zypper" ;;
+	esac
+    done
+}
 
 ME=$(basename $0)
 target=""
@@ -101,23 +249,24 @@ pkgdir="./rpm"
 
 while [[ $1 ]]; do
     case "$1" in
-        "-t" | "--target")
-	    shift
-	    target="$1"
-	    [[ -d ~/.scratchbox2/$target ]] || fatal "$target is an invalid sb2 target"
-	    shift
+        "-t" | "--target") shift
+	    target="$1"; shift
 	    ;;
-        "-s" )
-	    shift
-	    spec="$1"
-	    [[ -f $spec ]] || fatal "$spec doesn't exist"
-	    shift
+        "-d" | "--device") shift
+	    device="$1"; shift
+	    get_device "$device" < $DEVICES_XML || fatal "'$device' not found in devices.xml"
 	    ;;
-	qmake | make | install | rpm)
-	    cmd=run_$1
-            shift
-	    break 2
-            ;;
+        "-p" | "--projectdir") shift
+	    projdir="$1"; shift
+	    pkgdir=$projdir/rpm
+	    [[ -d $projdir ]] || fatal "'$projdir' is not a directory"
+	    ;;
+        "-s" | "--specfile" ) shift
+	    spec="$1"; shift
+	    [[ -f $spec ]] || fatal "'$spec' doesn't exist"
+	    ;;
+	qmake | make | install | rpm | deploy | build | run | ssh )
+	    break 2 ;;
 	*)
 	    usage
 	    exit 1
@@ -126,16 +275,46 @@ while [[ $1 ]]; do
 done
 
 if [[ ! $target ]]; then
-    fatal "You must specify an sb2 target"
+    if [[ -f ~/.scratchbox2/config ]]; then
+	. ~/.scratchbox2/config
+	target=$DEFAULT_TARGET
+    fi
+    [[ $target ]] || fatal "You must specify an sb2 target or have a default configured"
 fi
+
+[[ -d ~/.scratchbox2/$target ]] || fatal "$target is an invalid sb2 target"
 
 if [[ ! $spec ]]; then
     numspec=$(ls $pkgdir/*spec 2>/dev/null | wc -l)
     [[ $numspec -gt 1 ]] && fatal "Too many spec files - please use -s to identify which to use"
     [[ $numspec -eq 0 ]] && fatal "No spec file found in '$pkgdir/' - please use -s to identify which to use"
-    spec=$pkgdir/*.spec
+    spec=$(ls $pkgdir/*spec)
+    echo "spec is $spec"
 fi
 
-assert_spec_supports_mb2
+ensure_spec_newer_than_yaml
+
+case $1 in
+    qmake | make | install | rpm | deploy )
+	cmd=run_$1
+	assert_spec_supports_mb2
+        shift
+        ;;
+    build )
+	cmd=run_$1; shift
+	BUILD_DEBUG='--define "debug_package %{nil} "'
+	case "$1" in
+	    "-d" | "--enable-debug") shift
+		BUILD_DEBUG= ;;
+	esac
+        ;;
+    run | ssh ) shift
+	if [[ $device ]]; then
+	    cmd="ssh_as $deviceuser"
+	else
+	    cmd="eval"
+	fi
+        ;;
+esac
 
 $cmd "$@"

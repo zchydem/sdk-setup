@@ -88,6 +88,7 @@ SubPackages:
       - '%{_bindir}/qb'
       - '%{_bindir}/sdk-manage'
       - '%{_bindir}/updateQtCreatorTargets'
+      - '%{_sysconfdir}/bash_completion.d/mb.bash'
   - Name: sdk-mer-branding
     Summary: Mer Branding for the SDK Engine
     AsWholeName: true

@@ -148,6 +148,7 @@ cp src/mb2 %{buildroot}%{_bindir}/
 cp src/qb %{buildroot}%{_bindir}/
 cp src/sdk-manage %{buildroot}%{_bindir}/
 cp src/updateQtCreatorTargets %{buildroot}%{_bindir}/updateQtCreatorTargets
+install -D -m 644 src/mb.bash %{buildroot}/%{_sysconfdir}/bash_completion.d/mb.bash
 
 # sdk-mer-branding
 install -D -m 644 branding/mer-splash.png %{buildroot}%{_datadir}/plymouth/splash.png
@@ -241,6 +242,7 @@ if ! rpm --quiet -q ca-certificates && [ -d /%{_sysconfdir}/ssl/certs ] ; then e
 %{_bindir}/qb
 %{_bindir}/sdk-manage
 %{_bindir}/updateQtCreatorTargets
+%{_sysconfdir}/bash_completion.d/mb.bash
 # >> files sdk-utils
 # << files sdk-utils
 

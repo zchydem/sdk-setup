@@ -232,6 +232,8 @@ synchronise_target() {
 + */
 # We want this for QtCreator to determine the architecture
 + /usr/lib/libQt*Core.so
+# Qt5 qml imports are here, also sync the .so files
++ /usr/lib/qt5/qml**
 # Don't need any other .so files
 - *.so
 # All the import, include and qt* shares

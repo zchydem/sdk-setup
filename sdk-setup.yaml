@@ -2,7 +2,7 @@ Name: sdk-setup
 Summary: SDK setup packages for Mer SDK
 Description: Scripts, configurations and utilities to build Mer SDK and variants
 Version: 0.53
-Release: 1
+Release: 2
 Group: System/Base
 License: GPL
 BuildArch: noarch
@@ -113,4 +113,9 @@ SubPackages:
       - connman
     Files:
       - '%{_sysconfdir}/connman/main.conf'
-Patches: []
+Patches:
+  - 0001-Make-libsb2-upgradable-in-sdk-install-mode.patch
+  - 0002-Retains-cwd-with-spaces-when-entering-chroot.patch
+  - 0003-sdk-manage-Do-not-set-a-tools-dir-for-i486-sb2-targe.patch
+  - 0004-sdk-utils-Add-bash-completion-for-mb.patch
+  - 0005-sdk-manage-Sync-the-qt5-qml-imports-directories-too.patch

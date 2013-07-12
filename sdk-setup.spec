@@ -15,13 +15,18 @@ Name:       sdk-setup
 
 Summary:    SDK setup packages for Mer SDK
 Version:    0.53
-Release:    1
+Release:    2
 Group:      System/Base
 License:    GPL
 BuildArch:  noarch
 URL:        https://github.com/mer-tools/sdk-setup
 Source0:    sdk-setup-%{version}.tar.gz
 Source100:  sdk-setup.yaml
+Patch0:     0001-Make-libsb2-upgradable-in-sdk-install-mode.patch
+Patch1:     0002-Retains-cwd-with-spaces-when-entering-chroot.patch
+Patch2:     0003-sdk-manage-Do-not-set-a-tools-dir-for-i486-sb2-targe.patch
+Patch3:     0004-sdk-utils-Add-bash-completion-for-mb.patch
+Patch4:     0005-sdk-manage-Sync-the-qt5-qml-imports-directories-too.patch
 BuildRequires:  systemd
 
 %description
@@ -90,6 +95,16 @@ Connman configs for SDK emulator to ensure session is started
 %prep
 %setup -q -n src
 
+# 0001-Make-libsb2-upgradable-in-sdk-install-mode.patch
+%patch0 -p1
+# 0002-Retains-cwd-with-spaces-when-entering-chroot.patch
+%patch1 -p1
+# 0003-sdk-manage-Do-not-set-a-tools-dir-for-i486-sb2-targe.patch
+%patch2 -p1
+# 0004-sdk-utils-Add-bash-completion-for-mb.patch
+%patch3 -p1
+# 0005-sdk-manage-Sync-the-qt5-qml-imports-directories-too.patch
+%patch4 -p1
 # >> setup
 # << setup
 

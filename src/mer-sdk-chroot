@@ -166,6 +166,7 @@ prepare_mountpoints() {
     mount_bind /dev/shm
     mount_bind /var/lib/dbus
     mount_bind /var/run/dbus
+    mount_bind /var/run/resolvconf
 
     if [[ $bind_mount_root == "yes" ]] ; then
 	echo "Mounting / as /parentroot"
